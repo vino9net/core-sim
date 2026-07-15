@@ -1,0 +1,62 @@
+# Sim pods as a Knative Service.
+#
+# This works ONLY because of the outbox (ARCH_DESIGN.md D4): the pod holds no state, so
+# Knative's aggressive churn is harmless. Every request is either not yet in Redis (it
+# never happened; the client retries on the idempotency key) or fully in Redis including
+# its log entry. There is nothing to drain and nothing to lose.
+#
+# See deploy/k8s/relay-deployment.yaml for why the relay is NOT a Knative Service.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: core-sim
+spec:
+  template:
+    metadata:
+      annotations:
+        # --- these three settings are the benchmark, not decoration ---
+        #
+        # min-scale: no scale-to-zero during a run. Cold starts and connection-pool
+        # re-establishment would pollute the numbers.
+        autoscaling.knative.dev/min-scale: "4"
+        autoscaling.knative.dev/max-scale: "4"
+        # Pin the pod count and let concurrency ride. KPA's instinct is to spread load
+        # across many small pods, which starves in-process batching: batching needs many
+        # concurrent requests *per pod*. Many-small-pods collapses redis_batched toward
+        # redis_lua and you lose the headline number to a config default.
+        # Few pods, high concurrency. Not the reverse.
+        autoscaling.knative.dev/target: "500"
+        autoscaling.knative.dev/metric: "concurrency"
+    spec:
+      # 0 = unlimited. Same reason as above.
+      containerConcurrency: 0
+      timeoutSeconds: 60
+      containers:
+        - name: core-sim
+          image: core-sim:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENGINE
+              value: "redis_lua"
+            # Cross-node RTT is the gotcha that will actually bite: a Redis round trip
+            # is ~50-100µs of work, and a cross-node hop (~0.2-0.5ms) can quintuple it.
+            # Keep this in-cluster and same-AZ.
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+            - name: STREAM_MAXLEN
+              value: "1000000"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: LOG_JSON
+              value: "true"
+            # Never true during a run: ~10-50µs/request dominates the measurement.
+            - name: LOG_REQUESTS
+              value: "false"
+          resources:
+            requests: { cpu: "1", memory: "256Mi" }
+            limits: { cpu: "2", memory: "512Mi" }
+# ⚠ The queue-proxy sidecar sits in front of this container on every request
+# (~0.1-0.5ms + real CPU). You are benchmarking Knative + app, not app. Run the same
+# matrix on a plain Deployment to isolate the Knative tax — that delta is itself a
+# result worth publishing, and you need it to publish an honest number.

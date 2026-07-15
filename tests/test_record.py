@@ -1,0 +1,52 @@
+"""Record format is a wire contract between the Lua script, the relay, and any offline
+analysis. Round-tripping it is cheap insurance against a silent layout drift."""
+
+from __future__ import annotations
+
+from core_sim.record import (
+    RECORD_SIZE,
+    iter_records,
+    new_ulid,
+    pack,
+    str_to_ulid,
+    ulid_to_str,
+    unpack,
+)
+
+
+def test_record_is_64_bytes():
+    rec = pack(new_ulid(), 1, 2, 100, "SGD", 1_700_000_000_000, 1)
+    assert len(rec) == RECORD_SIZE == 64
+
+
+def test_round_trip():
+    ulid = new_ulid()
+    rec = pack(ulid, 42, 99, -12345, "USD", 1_700_000_000_000, 1)
+    got_ulid, frm, to, amt, ccy, ts, status = unpack(rec)
+    assert got_ulid == ulid
+    assert (frm, to, amt, ccy, ts, status) == (42, 99, -12345, "USD", 1_700_000_000_000, 1)
+
+
+def test_ulid_text_round_trip():
+    ulid = new_ulid()
+    text = ulid_to_str(ulid)
+    assert len(text) == 26
+    assert str_to_ulid(text) == ulid
+
+
+def test_ulid_is_time_ordered():
+    # The relay and any replay rely on this for a sane ordering by id.
+    a, b = new_ulid(), new_ulid()
+    assert a[:6] <= b[:6]
+
+
+def test_batch_iteration():
+    # Batches are records concatenated with no framing — the fixed width is the framing.
+    batch = b"".join(
+        pack(new_ulid(), i, i + 1, 10 * i, "SGD", 1_700_000_000_000 + i, 1) for i in range(5)
+    )
+    assert len(batch) == 5 * RECORD_SIZE
+    out = list(iter_records(batch))
+    assert len(out) == 5
+    assert [r[1] for r in out] == [0, 1, 2, 3, 4]
+    assert [r[3] for r in out] == [0, 10, 20, 30, 40]

@@ -1,0 +1,24 @@
+exclude: "^$|deploy|scripts|tmp"
+fail_fast: false
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: check-toml
+      # - id: debug-statements
+      #   args: ["--print-changes"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+
+      - id: ruff-format
+
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.59
+    hooks:
+      - id: ty

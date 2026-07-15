@@ -1,0 +1,88 @@
+# The relay — a PLAIN DEPLOYMENT, deliberately.
+#
+# ⚠ This must NOT be a Knative Service. It is a background loop (XREADGROUP -> publish
+# -> XACK), not request-driven. Knative Serving would scale it to zero when no HTTP
+# traffic arrives and relaying would silently stop — which breaks durability, since the
+# Redis stream is in-memory and bounded by MAXLEN. You would lose transfers with no
+# error anywhere.
+#
+# min-scale: 1 on a Knative Service would technically pin it, but Knative Serving is the
+# wrong abstraction for a worker. Don't fight it. Mixing Knative Services and plain
+# Deployments in one namespace is fine and normal.
+#
+# ARCH_DESIGN.md §7.2.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-sim-relay
+spec:
+  # One is enough: at 100k tps batched this moves ~6.4MB/s. Two in the same consumer
+  # group works and gives failover via XAUTOCLAIM, at the cost of global ordering
+  # (irrelevant for a conservation check — a sum is a sum).
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: core-sim-relay }
+  template:
+    metadata:
+      labels: { app: core-sim-relay }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: relay
+          image: core-sim:latest
+          command: ["core-sim-relay"]
+          env:
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+            - name: NATS_URL
+              value: "nats://nats:4222"
+            # Consumer name must be stable per replica so the PEL can be resumed after a
+            # restart. HOSTNAME is the pod name.
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            - name: RELAY_BATCH
+              value: "1000"
+            - name: LOG_LEVEL
+              value: "INFO"
+          resources:
+            requests: { cpu: "500m", memory: "128Mi" }
+            limits: { cpu: "1", memory: "256Mi" }
+---
+# Redis: no persistence, no PVC. Balances are derived state — reseed + replay is the
+# recovery path (ARCH_DESIGN.md §6.3). A pod restart wipes every balance and that is
+# the intended behaviour, not a gap.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args:
+            ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory-policy", "noeviction"]
+          ports: [{ containerPort: 6379 }]
+          resources:
+            # Single-threaded command execution: more than ~2 CPU buys nothing. Memory
+            # is what matters — the outbox stream at MAXLEN 1M is ~100MB on top of the
+            # account set (~50MB per 1M accounts).
+            requests: { cpu: "2", memory: "1Gi" }
+            limits: { cpu: "2", memory: "2Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector: { app: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]

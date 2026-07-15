@@ -1,0 +1,120 @@
+[project]
+name = "core-sim"
+version = "0.1.0"
+description = "Core banking simulator — fund transfer benchmark rig"
+authors = [{ name = "Li Lin", email = "guru.lin@gmail.com" }]
+readme = "README.md"
+# ARCH_DESIGN.md D1 picks 3.14 (see .python-version). Floor is 3.13 so the tree can
+# resolve if a dep lags.
+requires-python = ">= 3.13"
+dependencies = [
+    "litestar>=2.13",
+    "redis[hiredis]>=5.2",
+    "msgspec>=0.19",
+    "structlog>=24.4",
+    "nats-py>=2.9",
+    "uvicorn>=0.32",
+    # uvloop + httptools are the whole reason to use uvicorn here; both are named
+    # explicitly rather than relying on uvicorn[standard], which also drags in
+    # watchfiles/colorama that a benchmark rig has no use for.
+    "uvloop>=0.21; sys_platform != 'win32'",
+    "httptools>=0.6",
+]
+
+[project.optional-dependencies]
+# Postgres engines (pg_naive baseline etc.) — see ARCH_DESIGN.md D7.
+postgres = ["asyncpg>=0.30"]
+
+[project.scripts]
+core-sim = "core_sim.__main__:main"
+core-sim-relay = "core_sim.relay:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/core_sim"]
+
+[dependency-groups]
+dev = [
+    "pytest >= 8.3.0",
+    "pytest-dotenv >= 0.5.2",
+    "pytest-mock >= 3.14",
+    "pytest-cov >= 6.1",
+    "pytest-asyncio>=0.25.3",
+    "pre-commit >= 4.0.1",
+    "ruff>=0.15.21",
+    "pyright >= 1.1.405",
+    "ty>=0.0.59",
+    "httpx>=0.28",
+]
+
+[tool.uv]
+managed = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+env_files = [".env"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "tests/*",
+]
+
+# see ruff configuration options at
+# https://docs.astral.sh/ruff/configuration/
+
+[tool.ruff]
+line-length = 98
+indent-width = 4
+exclude = [
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "C",
+    "I",
+    "A",
+] # Enable checks for PEP8, imports, and other standard rules
+ignore = ["E203", "E266"]
+
+[tool.pyright]
+include = [
+    "src",
+    "tests"
+]
+exclude = [
+    ".venv/",
+    "build/",
+]
+pythonVersion = "3.14"
+
+[tool.ty]
+
+[tool.ty.src]
+include = [
+    "src",
+    "tests",
+]
+
+[tool.ty.rules]
+unused-ignore-comment = "warn"
+possibly-missing-import = "error"
+redundant-cast = "ignore"
+unresolved-import = "error"

@@ -1,0 +1,36 @@
+# Local dev dependencies. The app itself runs on the host via `uv run core-sim`.
+#
+# Both stores are up so the Dragonfly swap is a one-env-var experiment:
+#   REDIS_URL=redis://localhost:6380 uv run core-sim
+# See ARCH_DESIGN.md §8.1 — the Streams/consumer-group spike is still open, and this
+# compose file exists partly so that spike is cheap to run.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    # No persistence, on purpose (ARCH_DESIGN.md D3/§6.3): balances are derived state,
+    # rebuilt by reseed + replay. The log is the durable thing, not the ledger.
+    command: redis-server --appendonly no --save "" --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    ports: ["6380:6379"]
+    ulimits:
+      memlock: -1
+    command: ["--logtostderr"]
+
+  nats:
+    image: nats:2-alpine
+    ports: ["4222:4222", "8222:8222"]
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - nats-data:/data
+
+volumes:
+  nats-data:
