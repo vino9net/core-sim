@@ -12,11 +12,10 @@ provisional — are in **[docs/benchmark.md](docs/benchmark.md)**.
 
 ## Quickstart
 
-Needs a Redis. Either works:
+Needs a Redis:
 
 ```bash
-brew services start redis     # local, or...
-docker compose up -d redis    # ...containerised (compose also has nats + dragonfly)
+brew services start redis
 ```
 
 ```bash
@@ -43,9 +42,13 @@ something else (e.g. a local Homebrew instance on db 0).
 Relay (Redis outbox → NATS JetStream), in a second shell. This one does need NATS:
 
 ```bash
-docker compose up -d nats
+docker run -d --name nats -p 4222:4222 -p 8222:8222 -v nats-data:/data \
+  nats:2-alpine -js -sd /data -m 8222
 uv run core-sim-relay
 ```
+
+`-js` is not optional — the relay publishes to JetStream, not core NATS. The named volume
+keeps the log across restarts, which is the whole point of it being the log of record.
 
 ## API
 
@@ -107,7 +110,6 @@ see [docs/benchmark.md](docs/benchmark.md) for what has actually been measured.
 | `pg_batched` | ~50k | ~50k | planned |
 | `redis_lua` | ~80-120k | ~80-120k | **implemented — measured ~22k on a laptop** |
 | `redis_batched` | ~300-500k | ~300-500k | planned — the headline number |
-| `dragonfly_lua` | measure | measure | config swap (`REDIS_URL=redis://localhost:6380`) |
 
 Every target is an estimate. The one engine that exists came in ~4x under target, but so
 far only on an M4 MacBook Air with the load generator on the same 4 performance cores —
@@ -128,7 +130,7 @@ All env vars, so the store and engine swap between runs without a rebuild. See
 | var | default | note |
 |---|---|---|
 | `ENGINE` | `redis_lua` | |
-| `REDIS_URL` | `redis://localhost:6379` | `:6380` for Dragonfly via compose |
+| `REDIS_URL` | `redis://localhost:6379` | any Redis-protocol store |
 | `STREAM_MAXLEN` | `1000000` | **the one knob that can still lose data** — see below |
 | `LOG_REQUESTS` | `false` | ~10-50µs/req; never `true` during a run |
 | `LOG_JSON` | `true` | structured to stdout |

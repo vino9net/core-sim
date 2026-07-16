@@ -41,7 +41,7 @@ def _redis_available() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _redis_available(), reason=f"no redis at {REDIS_URL} (try: docker compose up -d redis)"
+    not _redis_available(), reason=f"no redis at {REDIS_URL} (try: brew services start redis)"
 )
 
 
