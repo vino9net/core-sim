@@ -12,8 +12,6 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     strategy:
       matrix:
         python-version:
@@ -38,21 +36,8 @@ jobs:
         uv run ruff check .
 
     - name: Unit tests
-      id: unit_tests
       run: |
-        uv run pytest -v -s --cov --cov-report=html
-
-        if [[ -f "htmlcov/index.html" ]]; then
-          echo "coverage_report=yes" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Upload test coverage report to GitHub pages
-      if: steps.unit_tests.outputs.coverage_report == 'yes'
-      uses: peaceiris/actions-gh-pages@v4
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: htmlcov
-      continue-on-error: true
+        uv run pytest -v -s --cov --cov-report=term-missing
 
   buildx:
     needs: pytest
