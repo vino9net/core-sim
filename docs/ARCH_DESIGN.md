@@ -118,10 +118,14 @@ buffer, so its length is relay-downtime tolerance. At 100k tps that is ~10s of r
 ~100MB RAM; 10M gives ~100s for ~1GB. **Trim below relay lag and transfers vanish with no
 error anywhere.** Set it deliberately.
 
-### D5 — Relay pod: Redis Streams → NATS JetStream
+### D5 — Relay pod: Redis Streams → Amazon Kinesis Data Streams
 
 ~25 lines, written in-house (§8 notes the off-the-shelf option). Consumer group,
-`XREADGROUP` → batch → `js.publish()` → `XACK`.
+`XREADGROUP` → batch → `put_records()` → `XACK`.
+
+This repo publishes only. Whatever consumes the Kinesis stream — e.g. a Lambda that fans a
+transfer out into a debit-account / credit-account DynamoDB item pair for an AppSync API —
+is a separate repo/consumer, out of scope here.
 
 **Publish *then* `XACK` is the whole durability argument.** Crash in between and entries stay
 in the Pending Entries List; the restarted relay re-sends. At-least-once; consumers dedupe on
@@ -131,25 +135,36 @@ transfer id.
 
 - **Redis stream = outbox.** Exists *only* because it can be written atomically with the
   ledger. In-memory, bounded to seconds, dies with Redis. It was never the log.
-- **NATS JetStream = log of record.** Durable, replayable, what consumers subscribe to — so
-  they aren't coupled to the ledger store or adding load to Redis's single bottleneck thread.
+- **Kinesis Data Streams = log of record.** Durable, replayable, what consumers subscribe to
+  — so they aren't coupled to the ledger store or adding load to Redis's single bottleneck
+  thread.
 
 Collapsing either one breaks something: drop the Redis stream and the sim pod is back to two
-non-atomic writes; drop NATS and there is no durable log to replay balances from.
+non-atomic writes; drop Kinesis and there is no durable log for a downstream consumer to
+replay from.
+
+**Publishing is a single knob: `KINESIS_STREAM`** (or `--publish STREAM`/`--no-publish` on
+the relay CLI, which take priority). Empty/unset disables it — the relay still drains the
+outbox stream and XACKs it, useful for running the Redis-side engine benchmark with no AWS
+account in the loop at all. No separate region/endpoint setting: boto3 resolves both itself,
+the same way it already resolves credentials.
 
 **Adaptive batching comes free.** `XREADGROUP count=1000 block=100`: under load, full batches
 immediately (ack cost amortizes to ~nothing); when idle, small batches at low latency. No
-timer, no flush logic. At 1000 transfers/message, 100k tps is ~100 publishes/sec at ~300µs —
-a 3% duty cycle on one asyncio loop.
+timer, no flush logic. `PutRecords` caps at 500 records/call, so a 1000-entry batch becomes 2
+calls — still trivial next to a per-request round trip.
 
 **Gotcha — drain the PEL on startup.** Read with cursor `"0"` until empty, *then* switch to
 `">"`. Starting at `">"` skips your own pending entries and they sit in the PEL forever —
 silently, and only after a restart. (`XAUTOCLAIM` is only needed if running >1 relay.)
 
-**Rejected — Kafka:** ecosystem, partition ordering at scale, and EOS buy a simulator
-nothing, and the bill is 3 JVM brokers + PVCs + an operator. That would cost more nodes than
-Redis and the sim pods combined. NATS JetStream R1 is one Go binary, one pod, one PVC. R3 if
-NATS itself needs to survive a pod loss — still well under a Kafka install.
+**Rejected — Kafka / MSK:** ecosystem, partition ordering at scale, and EOS buy a simulator
+nothing, and the bill is managed brokers + an operator's worth of complexity for a target
+that is already going to be DynamoDB. **Rejected — NATS JetStream:** was the original choice
+here (one Go binary, one pod, one PVC — still a fine choice on its own merits) but the
+production target became AWS-native (DynamoDB + AppSync), and Kinesis Data Streams is a
+managed, like-for-like replacement for "durable replayable log" with **no pod or PVC to run
+at all**, and no NATS→AWS bridge worth adopting just to avoid that swap.
 
 ### D6 — Representation and correctness
 
@@ -157,7 +172,7 @@ NATS itself needs to survive a pod loss — still well under a Kafka install.
 |---|---|
 | Money as `BIGINT` minor units | Never `NUMERIC` (slow), never float (wrong) |
 | Idempotency key, `SET NX` in-script | Retries are safe. **The load generator *will* retry.** Without this, a retry double-spends |
-| Fixed-width 64-byte binary log records | `struct.pack` ~0.2µs vs ~5µs stdlib JSON. At 100k tps JSON shows up in the profile. `np.fromfile` makes analysis trivial |
+| Fixed-width 160-byte binary log records (incl. 100-byte memo) | `struct.pack` ~0.2µs vs ~5µs stdlib JSON. At 100k tps JSON shows up in the profile. `np.fromfile` makes analysis trivial |
 | Transfer id (ULID/snowflake) on every record | Consumer-side dedupe for at-least-once delivery |
 
 ### D7 — Engine matrix (this is the deliverable)
@@ -177,7 +192,7 @@ Same REST surface, swappable by config. **The comparison is the product.**
 All figures are estimates for an 8-core VM except the measured `pg_naive` row.
 
 **The recurring lesson, and the rig should demonstrate it:** every optimisation here is the
-same one. `pg_batched`, `redis_batched`, the NATS publish, the file flush, surviving K8s
+same one. `pg_batched`, `redis_batched`, the Kinesis publish, the file flush, surviving K8s
 cross-node RTT — all of it is *amortize the call*. The call is always the cost.
 
 **Keep the Postgres engines.** They are where the hot-account story lives, and `pg_naive` is
@@ -214,8 +229,9 @@ having.
                       └──────────────┬───────────────┘
                                      ▼
                       ┌──────────────────────────────┐
-                      │  NATS JetStream — log of record
-                      │  → consumers, replay, conservation check
+                      │  Amazon Kinesis Data Streams — log of record
+                      │  → downstream consumer (separate repo): fan-out to
+                      │    DynamoDB, replay, conservation check
                       └──────────────────────────────┘
 ```
 
@@ -231,8 +247,10 @@ Redis, per account (`acct:{id}` hash):
 | `avail` | int | minor units |
 | `status` | int | |
 
-Transfer record (64-byte fixed-width binary, in the stream and on to NATS): `id`,
-`from_account`, `to_account`, `amount`, `currency`, `ts`, `status`.
+Transfer record (160-byte fixed-width binary, in the stream and on to Kinesis): `id`,
+`from_account`, `to_account`, `amount`, `currency`, `ts`, `status`, `memo` (100 bytes, UTF-8).
+One record per transfer — a debit-account / credit-account leg split, if a consumer wants
+that shape (e.g. an online-banking transaction history view), happens downstream, not here.
 
 Postgres engines mirror this: `accounts` and `transfers` as `UNLOGGED` tables (skips WAL,
 truncated on crash recovery — correct for a simulator, worth ~2-3x), plus
@@ -259,8 +277,8 @@ lost-update race, i.e. benchmarking a broken implementation. This check would ha
 |---|---|---|
 | **Sim pod** | In-flight requests reset. They never took effect (D4) | Client retries on idempotency key. **No loss, no inconsistency.** Nothing to drain |
 | **Relay pod** | Nothing lost — entries stay in the PEL | Restart resumes from PEL. Stream is the buffer; sized by `MAXLEN` |
-| **Redis** | All balances *and* the stream — but **lost consistently** | Reseed + replay from JetStream (§6.3) |
-| **NATS** | The durable log | R3 stream if this matters |
+| **Redis** | All balances *and* the stream — but **lost consistently** | Reseed + replay from Kinesis (§6.3) |
+| **Kinesis** | The durable log (AWS-managed; not something this stack runs/restarts) | Retention window sized to cover an outage; downstream consumer replays from a shard iterator |
 
 **RPO = relay lag**, and nothing else. Keep the loop tight and that is single-digit ms —
 better than Redis `appendfsync everysec` would give, at ~zero hot-path cost, because all the
@@ -294,7 +312,7 @@ It will be run constantly.
 | sim pods | Knative Service (§7.2) | Stateless. Scale freely |
 | Redis / Dragonfly | Deployment + Service | No PVC, no persistence. Reseed on restart |
 | relay | **plain Deployment** | **Not Knative** — see §7.2 |
-| NATS | StatefulSet + PVC | JetStream R1 (R3 if NATS must survive pod loss) |
+| Kinesis Data Streams | AWS-managed, no K8s workload | Shard count sized for throughput; no pod/PVC to run at all |
 
 **Pod-to-pod RTT is the gotcha that will actually bite.** Same-node ~0.05ms, cross-node
 ~0.2-0.5ms. A Redis round trip is ~50-100µs of *work* wrapped in that — a cross-node hop can
@@ -345,8 +363,10 @@ that alignment is not a coincidence, it's the same property (statelessness) payi
 2. **Knative tax.** Measure the plain-Deployment vs Knative-Service delta before trusting any
    absolute number.
 3. **Relay: build vs Redpanda Connect.** Redpanda Connect (ex-Benthos) does
-   `redis_streams` → `nats_jetstream` in config, single Go binary, no code — a legitimate
+   `redis_streams` → `aws_kinesis` in config, single Go binary, no code — a legitimate
    choice. Decided to write the 25 lines because the relay is a *measured component*: we want
    our own lag/batch-size/ack-latency instrumentation, the binary record format, and a loop
    we can read when a run looks weird. Revisit if the relay stops being interesting.
-4. **JetStream R1 vs R3.** R1 until NATS pod loss is shown to matter.
+4. **Kinesis shard count.** Sized for the target sustained records/sec once that number is
+   known; too few shards throttles `PutRecords` under load, which — same as the Redis stream
+   `MAXLEN` knob — fails silently unless watched for.

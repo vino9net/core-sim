@@ -1,4 +1,4 @@
-"""Fixed-width 64-byte binary transfer record (ARCH_DESIGN.md D6).
+"""Fixed-width 160-byte binary transfer record (ARCH_DESIGN.md D6).
 
 Why not JSON: ``struct.pack`` is ~0.2µs vs ~5µs for stdlib json. At 100k tps that
 difference shows up in the profile of a rig whose entire job is measuring µs. It also
@@ -8,16 +8,21 @@ makes analysis trivial::
     a = np.fromfile("transfers.bin", dtype=DTYPE)
     assert a["amount"].sum() == 0   # if you log signed legs
 
-Layout (little-endian, no padding — sizes add to exactly 64)::
+This is still one record per transfer, not one per ledger leg — a consumer that wants
+a debit-account / credit-account view (e.g. the DynamoDB projection in the downstream
+consumer) fans this one record out into two, since only the consumer needs that shape.
 
-    16s  id            ULID, binary
-    Q    from_account  uint64
-    Q    to_account    uint64
-    q    amount        int64, minor units
-    4s   currency      3 chars + 1 pad
-    q    created_at    int64, epoch ms
-    B    status        uint8
-    11x  reserved
+Layout (little-endian, no padding — sizes add to exactly 160)::
+
+    16s   id            ULID, binary
+    Q     from_account  uint64
+    Q     to_account    uint64
+    q     amount        int64, minor units
+    4s    currency      3 chars + 1 pad
+    q     created_at    int64, epoch ms
+    B     status        uint8
+    100s  memo          UTF-8, null-padded/truncated to MEMO_SIZE bytes
+    7x    reserved
 """
 
 from __future__ import annotations
@@ -26,9 +31,11 @@ import os
 import struct
 import time
 
-_RECORD = struct.Struct("<16sQQq4sqB11x")
+MEMO_SIZE = 100
+
+_RECORD = struct.Struct(f"<16sQQq4sqB{MEMO_SIZE}s7x")
 RECORD_SIZE = _RECORD.size
-assert RECORD_SIZE == 64, f"record must be 64 bytes, got {RECORD_SIZE}"
+assert RECORD_SIZE == 160, f"record must be 160 bytes, got {RECORD_SIZE}"
 
 # numpy dtype for offline analysis; mirrors the struct above.
 NUMPY_DTYPE = [
@@ -39,7 +46,8 @@ NUMPY_DTYPE = [
     ("currency", "S4"),
     ("created_at", "<i8"),
     ("status", "u1"),
-    ("_pad", "S11"),
+    ("memo", f"S{MEMO_SIZE}"),
+    ("_pad", "S7"),
 ]
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -79,6 +87,7 @@ def pack(
     currency: str,
     created_at: int,
     status: int,
+    memo: str = "",
 ) -> bytes:
     return _RECORD.pack(
         ulid,
@@ -88,12 +97,22 @@ def pack(
         currency.encode("ascii")[:4],
         created_at,
         status,
+        memo.encode("utf-8")[:MEMO_SIZE],
     )
 
 
-def unpack(buf: bytes, offset: int = 0) -> tuple[bytes, int, int, int, str, int, int]:
-    ulid, frm, to, amt, ccy, ts, status = _RECORD.unpack_from(buf, offset)
-    return ulid, frm, to, amt, ccy.rstrip(b"\x00").decode("ascii"), ts, status
+def unpack(buf: bytes, offset: int = 0) -> tuple[bytes, int, int, int, str, int, int, str]:
+    ulid, frm, to, amt, ccy, ts, status, memo = _RECORD.unpack_from(buf, offset)
+    return (
+        ulid,
+        frm,
+        to,
+        amt,
+        ccy.rstrip(b"\x00").decode("ascii"),
+        ts,
+        status,
+        memo.rstrip(b"\x00").decode("utf-8", errors="replace"),
+    )
 
 
 def iter_records(buf: bytes):

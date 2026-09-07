@@ -51,9 +51,15 @@ class Settings:
     idem_ttl_seconds: int = 86_400
 
     # --- relay (ARCH_DESIGN.md D5) ---
-    nats_url: str = "nats://localhost:4222"
-    nats_subject: str = "transfers"
-    nats_stream: str = "TRANSFERS"
+    # Empty = publishing disabled: the relay still drains the outbox stream and XACKs
+    # it, just without shipping anywhere. Lets you run the Redis-side engine benchmark
+    # with no AWS account in the loop at all. Set to a stream name to enable.
+    #
+    # Region and endpoint are deliberately not settings here — boto3 already resolves
+    # both itself (AWS_REGION/AWS_DEFAULT_REGION/~/.aws/config/instance metadata for
+    # region; AWS_ENDPOINT_URL_KINESIS for a LocalStack override), the same way it
+    # already resolves credentials without us reading AWS_ACCESS_KEY_ID ourselves.
+    kinesis_stream: str = ""
     relay_group: str = "relay"
     relay_consumer: str = "relay-1"
     relay_batch: int = 1_000
@@ -83,9 +89,7 @@ class Settings:
             stream_key=_env("STREAM_KEY", cls.stream_key),
             stream_maxlen=_env_int("STREAM_MAXLEN", cls.stream_maxlen),
             idem_ttl_seconds=_env_int("IDEM_TTL_SECONDS", cls.idem_ttl_seconds),
-            nats_url=_env("NATS_URL", cls.nats_url),
-            nats_subject=_env("NATS_SUBJECT", cls.nats_subject),
-            nats_stream=_env("NATS_STREAM", cls.nats_stream),
+            kinesis_stream=_env("KINESIS_STREAM", cls.kinesis_stream),
             relay_group=_env("RELAY_GROUP", cls.relay_group),
             relay_consumer=_env("RELAY_CONSUMER", os.getenv("HOSTNAME", cls.relay_consumer)),
             relay_batch=_env_int("RELAY_BATCH", cls.relay_batch),

@@ -12,7 +12,7 @@ dependencies = [
     "redis[hiredis]>=5.2",
     "msgspec>=0.19",
     "structlog>=24.4",
-    "nats-py>=2.9",
+    "boto3>=1.34",
     "uvicorn>=0.32",
     # uvloop + httptools are the whole reason to use uvicorn here; both are named
     # explicitly rather than relying on uvicorn[standard], which also drags in

@@ -14,17 +14,34 @@ from core_sim.record import (
 )
 
 
-def test_record_is_64_bytes():
+def test_record_is_160_bytes():
     rec = pack(new_ulid(), 1, 2, 100, "SGD", 1_700_000_000_000, 1)
-    assert len(rec) == RECORD_SIZE == 64
+    assert len(rec) == RECORD_SIZE == 160
 
 
 def test_round_trip():
     ulid = new_ulid()
-    rec = pack(ulid, 42, 99, -12345, "USD", 1_700_000_000_000, 1)
-    got_ulid, frm, to, amt, ccy, ts, status = unpack(rec)
+    rec = pack(ulid, 42, 99, -12345, "USD", 1_700_000_000_000, 1, memo="rent")
+    got_ulid, frm, to, amt, ccy, ts, status, memo = unpack(rec)
     assert got_ulid == ulid
-    assert (frm, to, amt, ccy, ts, status) == (42, 99, -12345, "USD", 1_700_000_000_000, 1)
+    assert (frm, to, amt, ccy, ts, status, memo) == (
+        42,
+        99,
+        -12345,
+        "USD",
+        1_700_000_000_000,
+        1,
+        "rent",
+    )
+
+
+def test_memo_defaults_empty_and_truncates():
+    rec = pack(new_ulid(), 1, 2, 100, "SGD", 1_700_000_000_000, 1)
+    assert unpack(rec)[7] == ""
+
+    long_memo = "x" * 200
+    rec = pack(new_ulid(), 1, 2, 100, "SGD", 1_700_000_000_000, 1, memo=long_memo)
+    assert unpack(rec)[7] == "x" * 100
 
 
 def test_ulid_text_round_trip():

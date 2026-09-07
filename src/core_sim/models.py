@@ -9,8 +9,13 @@ Money is ``int`` minor units everywhere. Never float, never Decimal (D6).
 from __future__ import annotations
 
 from enum import IntEnum
+from typing import Annotated
 
 import msgspec
+
+# Matches the memo field width in record.py (MEMO_SIZE) — kept in sync so a request
+# that passes validation always fits the binary record with no silent truncation.
+MEMO_MAX_LEN = 100
 
 
 class TransferStatus(IntEnum):
@@ -49,7 +54,7 @@ class TransferRequest(msgspec.Struct):
     to_account: int
     amount: int
     currency: str
-    memo: str = ""
+    memo: Annotated[str, msgspec.Meta(max_length=MEMO_MAX_LEN)] = ""
     # Optional, but the load generator should always send one. Without it a retry
     # double-spends, and the load generator *will* retry (ARCH_DESIGN.md D6).
     idempotency_key: str | None = None
