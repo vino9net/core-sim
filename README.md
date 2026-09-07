@@ -39,16 +39,23 @@ curl localhost:8000/accounts/1
 and the outbox stream, never `FLUSHDB`. Safe to point at a Redis you share with
 something else (e.g. a local Homebrew instance on db 0).
 
-Relay (Redis outbox → NATS JetStream), in a second shell. This one does need NATS:
+Relay (Redis outbox → Kinesis), in a second shell. No extra service needed for this —
+with no `KINESIS_STREAM` set, it just drains the outbox and XACKs it without publishing
+anywhere, which is enough to exercise the Redis-side engine end to end:
 
 ```bash
-docker run -d --name nats -p 4222:4222 -p 8222:8222 -v nats-data:/data \
-  nats:2-alpine -js -sd /data -m 8222
 uv run core-sim-relay
 ```
 
-`-js` is not optional — the relay publishes to JetStream, not core NATS. The named volume
-keeps the log across restarts, which is the whole point of it being the log of record.
+To actually publish, point it at a real Kinesis stream (`aws kinesis create-stream
+--stream-name transfers --shard-count 1` once, if it doesn't exist yet). AWS credentials
+and region are not env vars this app reads — boto3 finds them the normal way (an IAM
+instance profile, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or `~/.aws/credentials`):
+
+```bash
+KINESIS_STREAM=transfers uv run core-sim-relay
+# or: uv run core-sim-relay --publish transfers
+```
 
 ## API
 
@@ -132,16 +139,21 @@ All env vars, so the store and engine swap between runs without a rebuild. See
 | `ENGINE` | `redis_lua` | |
 | `REDIS_URL` | `redis://localhost:6379` | any Redis-protocol store |
 | `STREAM_MAXLEN` | `1000000` | **the one knob that can still lose data** — see below |
+| `KINESIS_STREAM` | *(empty)* | relay's publish target; empty = drain + XACK, don't publish |
 | `LOG_REQUESTS` | `false` | ~10-50µs/req; never `true` during a run |
 | `LOG_JSON` | `true` | structured to stdout |
 
 `STREAM_MAXLEN` is the relay's buffer, so it's relay-downtime tolerance. ~1M ≈ 10s @
 100k tps ≈ 100MB. Trim below relay lag and transfers vanish with no error anywhere.
 
+`KINESIS_STREAM` has no accompanying region/endpoint setting — boto3 resolves those
+itself, the same way it resolves credentials. `core-sim-relay --publish STREAM` /
+`--no-publish` override it from the CLI.
+
 ## Architecture in one breath
 
 ```
-sim pods (stateless) ──EVALSHA: debit+credit+XADD (atomic)──► Redis ──XREADGROUP──► relay ──► NATS JetStream
+sim pods (stateless) ──EVALSHA: debit+credit+XADD (atomic)──► Redis ──XREADGROUP──► relay ──► Kinesis Data Streams
 ```
 
 The `XADD` inside the transfer script is the decision everything else rests on. Because
@@ -160,10 +172,10 @@ src/core_sim/
   config.py      env settings
   logging.py     structlog → stdout
   models.py      msgspec structs, TransferStatus
-  record.py      64-byte fixed-width binary record
+  record.py      160-byte fixed-width binary record (incl. 100-byte memo)
   api.py         routes
   app.py         Litestar factory
-  relay.py       Redis Stream → NATS JetStream
+  relay.py       Redis Stream → Kinesis Data Streams
   engines/
     __init__.py  Engine ABC + registry
     redis_lua.py the implemented engine

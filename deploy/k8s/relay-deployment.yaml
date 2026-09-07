@@ -36,8 +36,12 @@ spec:
           env:
             - name: REDIS_URL
               value: "redis://redis:6379"
-            - name: NATS_URL
-              value: "nats://nats:4222"
+            # Empty/unset = publishing disabled (relay still drains + XACKs the outbox).
+            # Set to a real stream name to publish to Kinesis. AWS credentials/region are
+            # NOT env vars here — supply them via IRSA (IAM Roles for Service Accounts)
+            # on this pod's ServiceAccount, which boto3 picks up automatically.
+            - name: KINESIS_STREAM
+              value: "transfers"
             # Consumer name must be stable per replica so the PEL can be resumed after a
             # restart. HOSTNAME is the pod name.
             - name: HOSTNAME
