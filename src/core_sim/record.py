@@ -12,16 +12,18 @@ This is still one record per transfer, not one per ledger leg — a consumer tha
 a debit-account / credit-account view (e.g. the DynamoDB projection in the downstream
 consumer) fans this one record out into two, since only the consumer needs that shape.
 
-Layout (little-endian, no padding — sizes add to exactly 160)::
+Layout (little-endian, no padding — sizes add to exactly 176)::
 
-    16s   id            ULID, binary
-    Q     from_account  uint64
-    Q     to_account    uint64
-    q     amount        int64, minor units
-    4s    currency      3 chars + 1 pad
-    q     created_at    int64, epoch ms
-    B     status        uint8
-    100s  memo          UTF-8, null-padded/truncated to MEMO_SIZE bytes
+    16s   id                 ULID, binary
+    Q     from_account       uint64
+    Q     to_account         uint64
+    q     amount             int64, minor units
+    4s    currency           3 chars + 1 pad
+    q     created_at         int64, epoch ms
+    B     status             uint8
+    100s  memo               UTF-8, null-padded/truncated to MEMO_SIZE bytes
+    Q     from_customer_id   uint64
+    Q     to_customer_id     uint64
     7x    reserved
 """
 
@@ -33,9 +35,9 @@ import time
 
 MEMO_SIZE = 100
 
-_RECORD = struct.Struct(f"<16sQQq4sqB{MEMO_SIZE}s7x")
+_RECORD = struct.Struct(f"<16sQQq4sqB{MEMO_SIZE}sQQ7x")
 RECORD_SIZE = _RECORD.size
-assert RECORD_SIZE == 160, f"record must be 160 bytes, got {RECORD_SIZE}"
+assert RECORD_SIZE == 176, f"record must be 176 bytes, got {RECORD_SIZE}"
 
 # numpy dtype for offline analysis; mirrors the struct above.
 NUMPY_DTYPE = [
@@ -47,6 +49,8 @@ NUMPY_DTYPE = [
     ("created_at", "<i8"),
     ("status", "u1"),
     ("memo", f"S{MEMO_SIZE}"),
+    ("from_customer_id", "<u8"),
+    ("to_customer_id", "<u8"),
     ("_pad", "S7"),
 ]
 
@@ -88,6 +92,8 @@ def pack(
     created_at: int,
     status: int,
     memo: str = "",
+    from_customer_id: int = 0,
+    to_customer_id: int = 0,
 ) -> bytes:
     return _RECORD.pack(
         ulid,
@@ -98,11 +104,15 @@ def pack(
         created_at,
         status,
         memo.encode("utf-8")[:MEMO_SIZE],
+        from_customer_id,
+        to_customer_id,
     )
 
 
-def unpack(buf: bytes, offset: int = 0) -> tuple[bytes, int, int, int, str, int, int, str]:
-    ulid, frm, to, amt, ccy, ts, status, memo = _RECORD.unpack_from(buf, offset)
+def unpack(
+    buf: bytes, offset: int = 0
+) -> tuple[bytes, int, int, int, str, int, int, str, int, int]:
+    ulid, frm, to, amt, ccy, ts, status, memo, from_cid, to_cid = _RECORD.unpack_from(buf, offset)
     return (
         ulid,
         frm,
@@ -112,6 +122,8 @@ def unpack(buf: bytes, offset: int = 0) -> tuple[bytes, int, int, int, str, int,
         ts,
         status,
         memo.rstrip(b"\x00").decode("utf-8", errors="replace"),
+        from_cid,
+        to_cid,
     )
 
 

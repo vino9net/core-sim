@@ -46,6 +46,7 @@ class Account(msgspec.Struct):
     currency: str
     balance: int
     avail_balance: int
+    customer_id: int = 0
     status: int = 1
 
 
@@ -69,6 +70,8 @@ class Transfer(msgspec.Struct):
     memo: str
     status: str
     created_at: int
+    from_customer_id: int = 0
+    to_customer_id: int = 0
 
 
 class TransferResult(msgspec.Struct):
@@ -77,6 +80,8 @@ class TransferResult(msgspec.Struct):
     status: TransferStatus
     transfer_id: str | None = None
     created_at: int = 0
+    from_customer_id: int = 0
+    to_customer_id: int = 0
 
 
 class SeedRequest(msgspec.Struct):

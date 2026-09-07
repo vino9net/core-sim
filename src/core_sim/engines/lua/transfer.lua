@@ -14,9 +14,10 @@
 -- ARGV[5] stream maxlen ARGV[6] created_at (epoch ms)
 -- ARGV[7] from_id       ARGV[8] to_id       ARGV[9] idem ttl seconds
 --
--- returns {status, transfer_id, created_at}
+-- returns {status, transfer_id, created_at, from_customer_id, to_customer_id}
 -- status: 0=insufficient 1=ok 2=duplicate 3=no_such_account 4=currency_mismatch
 --         (keep in sync with models.TransferStatus)
+-- customer ids are '' when unknown (e.g. the account does not exist).
 
 local from_key, to_key, idem_key, stream_key = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
 local amount   = tonumber(ARGV[1])
@@ -28,6 +29,11 @@ local created  = ARGV[6]
 local from_id  = ARGV[7]
 local to_id    = ARGV[8]
 local idem_ttl = tonumber(ARGV[9])
+
+-- Fetched once, up front, so every return path — including duplicate and
+-- account-not-found — carries the same shape back to the caller.
+local from_cid = redis.call('HGET', from_key, 'customer_id') or ''
+local to_cid   = redis.call('HGET', to_key, 'customer_id') or ''
 
 local claimed_idem = false
 
@@ -44,26 +50,26 @@ if idem_key ~= '' then
     claimed_idem = true
   else
     local prior = redis.call('GET', idem_key)
-    return {2, prior, created}
+    return {2, prior, created, from_cid, to_cid}
   end
 end
 
-if amount <= 0 then release(); return {0, '', created} end
-if from_id == to_id then release(); return {0, '', created} end
+if amount <= 0 then release(); return {0, '', created, from_cid, to_cid} end
+if from_id == to_id then release(); return {0, '', created, from_cid, to_cid} end
 
 -- 2. both accounts must exist
 local from_ccy = redis.call('HGET', from_key, 'currency')
 local to_ccy   = redis.call('HGET', to_key, 'currency')
-if not from_ccy or not to_ccy then release(); return {3, '', created} end
+if not from_ccy or not to_ccy then release(); return {3, '', created, from_cid, to_cid} end
 
 -- 3. same-currency only (no FX — explicit non-goal)
 if from_ccy ~= currency or to_ccy ~= currency then
-  release(); return {4, '', created}
+  release(); return {4, '', created, from_cid, to_cid}
 end
 
 -- 4. funds
 local avail = tonumber(redis.call('HGET', from_key, 'avail_balance'))
-if avail < amount then release(); return {0, '', created} end
+if avail < amount then release(); return {0, '', created, from_cid, to_cid} end
 
 -- 5. mutate + log. Atomic from here by construction.
 redis.call('HINCRBY', from_key, 'avail_balance', -amount)
@@ -81,6 +87,8 @@ redis.call('XADD', stream_key, 'MAXLEN', '~', maxlen, '*',
            'a',  amount,
            'c',  currency,
            'm',  memo,
-           'ts', created)
+           'ts', created,
+           'fc', from_cid,
+           'tc', to_cid)
 
-return {1, xfer_id, created}
+return {1, xfer_id, created, from_cid, to_cid}

@@ -141,6 +141,8 @@ def _to_record(fields: dict[bytes, bytes]) -> bytes:
         created_at=int(fields[b"ts"]),
         status=1,
         memo=fields.get(b"m", b"").decode("utf-8", errors="replace"),
+        from_customer_id=int(fields.get(b"fc") or 0),
+        to_customer_id=int(fields.get(b"tc") or 0),
     )
 
 

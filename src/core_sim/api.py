@@ -60,6 +60,8 @@ async def create_transfer(data: TransferRequest, engine: Engine) -> Response[Tra
                 memo=data.memo,
                 status=result.status.name,
                 created_at=result.created_at,
+                from_customer_id=result.from_customer_id,
+                to_customer_id=result.to_customer_id,
             ),
             status_code=http_status,
         )

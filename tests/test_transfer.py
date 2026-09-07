@@ -72,6 +72,10 @@ async def test_happy_path(engine):
     assert a.balance == OPENING - 500
     assert a.avail_balance == OPENING - 500
     assert b.balance == OPENING + 500
+    assert res.from_customer_id == a.customer_id
+    assert res.to_customer_id == b.customer_id
+    assert a.customer_id > 0
+    assert b.customer_id > 0
 
 
 async def test_insufficient_funds_is_rejected_not_overdrawn(engine):
@@ -118,6 +122,21 @@ async def test_failed_transfer_does_not_burn_idempotency_key(engine):
     assert (
         await engine.transfer(_req(0, 1, 10, idempotency_key=key))
     ).status is TransferStatus.OK
+
+
+async def test_seed_assigns_customer_ids_with_long_tail(engine):
+    """Most customers own exactly 1 account; a shrinking tail owns up to 5, never more."""
+    accounts = await asyncio.gather(*(engine.get_account(i) for i in range(N)))
+    by_customer: dict[int, int] = {}
+    for a in accounts:
+        assert a.customer_id > 0
+        by_customer[a.customer_id] = by_customer.get(a.customer_id, 0) + 1
+
+    counts = list(by_customer.values())
+    assert sum(counts) == N
+    assert max(counts) <= 5
+    # Single-account customers should dominate (weighted ~70% by construction).
+    assert sum(1 for c in counts if c == 1) > sum(1 for c in counts if c > 1)
 
 
 async def test_seed_does_not_touch_foreign_keys(engine):

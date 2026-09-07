@@ -14,17 +14,28 @@ from core_sim.record import (
 )
 
 
-def test_record_is_160_bytes():
+def test_record_is_176_bytes():
     rec = pack(new_ulid(), 1, 2, 100, "SGD", 1_700_000_000_000, 1)
-    assert len(rec) == RECORD_SIZE == 160
+    assert len(rec) == RECORD_SIZE == 176
 
 
 def test_round_trip():
     ulid = new_ulid()
-    rec = pack(ulid, 42, 99, -12345, "USD", 1_700_000_000_000, 1, memo="rent")
-    got_ulid, frm, to, amt, ccy, ts, status, memo = unpack(rec)
+    rec = pack(
+        ulid,
+        42,
+        99,
+        -12345,
+        "USD",
+        1_700_000_000_000,
+        1,
+        memo="rent",
+        from_customer_id=7,
+        to_customer_id=11,
+    )
+    got_ulid, frm, to, amt, ccy, ts, status, memo, from_cid, to_cid = unpack(rec)
     assert got_ulid == ulid
-    assert (frm, to, amt, ccy, ts, status, memo) == (
+    assert (frm, to, amt, ccy, ts, status, memo, from_cid, to_cid) == (
         42,
         99,
         -12345,
@@ -32,7 +43,14 @@ def test_round_trip():
         1_700_000_000_000,
         1,
         "rent",
+        7,
+        11,
     )
+
+
+def test_customer_id_defaults_to_zero():
+    rec = pack(new_ulid(), 1, 2, 100, "SGD", 1_700_000_000_000, 1)
+    assert unpack(rec)[8:10] == (0, 0)
 
 
 def test_memo_defaults_empty_and_truncates():

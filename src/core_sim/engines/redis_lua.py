@@ -16,6 +16,7 @@ prototype ended up *slower than Postgres* (see ARCH_DESIGN.md §6.1):
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 from redis.asyncio import BlockingConnectionPool, Redis
@@ -37,6 +38,28 @@ log = get_logger(__name__)
 
 _LUA_PATH = Path(__file__).parent / "lua" / "transfer.lua"
 _SEED_CHUNK = 5_000
+
+# Customer-to-account ratio: most customers hold one account, a shrinking tail holds
+# up to 5. Weights sum to 1.0.
+_ACCOUNTS_PER_CUSTOMER = [1, 2, 3, 4, 5]
+_ACCOUNTS_PER_CUSTOMER_WEIGHTS = [0.70, 0.18, 0.07, 0.03, 0.02]
+# Fixed, not random.Random() default-seeded: balances are derived state that a reseed
+# must reproduce exactly (ARCH_DESIGN.md §6.3), and account-to-customer ownership is
+# now part of that derived state too.
+_CUSTOMER_ASSIGNMENT_SEED = 1337
+
+
+def _assign_customer_ids(n_accounts: int) -> list[int]:
+    """One customer id (1-based) per account index 0..n_accounts-1."""
+    rng = random.Random(_CUSTOMER_ASSIGNMENT_SEED)
+    customer_ids: list[int] = []
+    next_customer_id = 1
+    while len(customer_ids) < n_accounts:
+        size = rng.choices(_ACCOUNTS_PER_CUSTOMER, weights=_ACCOUNTS_PER_CUSTOMER_WEIGHTS)[0]
+        size = min(size, n_accounts - len(customer_ids))
+        customer_ids.extend([next_customer_id] * size)
+        next_customer_id += 1
+    return customer_ids
 
 
 def _now_ms() -> int:
@@ -130,6 +153,7 @@ class RedisLuaEngine(Engine):
             currency=_text(raw[b"currency"]),
             balance=int(raw[b"balance"]),
             avail_balance=int(raw[b"avail_balance"]),
+            customer_id=int(raw[b"customer_id"]),
             status=int(raw[b"status"]),
         )
 
@@ -139,7 +163,7 @@ class RedisLuaEngine(Engine):
         xfer_id = ulid_to_str(new_ulid())
         created = _now_ms()
 
-        status, returned_id, ts = await self._xfer(
+        status, returned_id, ts, from_cid, to_cid = await self._xfer(
             keys=[
                 f"acct:{req.from_account}",
                 f"acct:{req.to_account}",
@@ -164,6 +188,8 @@ class RedisLuaEngine(Engine):
             status=TransferStatus(int(status)),
             transfer_id=transfer_id or None,
             created_at=int(ts) if ts else created,
+            from_customer_id=int(from_cid) if from_cid else 0,
+            to_customer_id=int(to_cid) if to_cid else 0,
         )
 
     # --- admin -------------------------------------------------------------
@@ -199,6 +225,7 @@ class RedisLuaEngine(Engine):
         # UNLINK rather than DEL — it reclaims memory on a background thread, so a large
         # reseed does not stall Redis's single command thread.
         await self._delete_scoped(["acct:*", "idem:*", self._s.stream_key])
+        customer_ids = _assign_customer_ids(n_accounts)
         for base in range(0, n_accounts, _SEED_CHUNK):
             pipe = self._r.pipeline(transaction=False)
             for i in range(base, min(base + _SEED_CHUNK, n_accounts)):
@@ -209,6 +236,7 @@ class RedisLuaEngine(Engine):
                         "currency": currency,
                         "balance": opening_balance,
                         "avail_balance": opening_balance,
+                        "customer_id": customer_ids[i],
                         "status": 1,
                     },
                 )
@@ -217,6 +245,7 @@ class RedisLuaEngine(Engine):
             "engine.seeded",
             engine=self.name,
             n_accounts=n_accounts,
+            n_customers=customer_ids[-1] if customer_ids else 0,
             opening_balance=opening_balance,
             currency=currency,
             expected_total=n_accounts * opening_balance,

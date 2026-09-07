@@ -172,7 +172,7 @@ at all**, and no NATS→AWS bridge worth adopting just to avoid that swap.
 |---|---|
 | Money as `BIGINT` minor units | Never `NUMERIC` (slow), never float (wrong) |
 | Idempotency key, `SET NX` in-script | Retries are safe. **The load generator *will* retry.** Without this, a retry double-spends |
-| Fixed-width 160-byte binary log records (incl. 100-byte memo) | `struct.pack` ~0.2µs vs ~5µs stdlib JSON. At 100k tps JSON shows up in the profile. `np.fromfile` makes analysis trivial |
+| Fixed-width 176-byte binary log records (incl. 100-byte memo) | `struct.pack` ~0.2µs vs ~5µs stdlib JSON. At 100k tps JSON shows up in the profile. `np.fromfile` makes analysis trivial |
 | Transfer id (ULID/snowflake) on every record | Consumer-side dedupe for at-least-once delivery |
 
 ### D7 — Engine matrix (this is the deliverable)
@@ -245,10 +245,12 @@ Redis, per account (`acct:{id}` hash):
 | `currency` | string | ISO 4217 |
 | `balance` | int | minor units |
 | `avail` | int | minor units |
+| `customer_id` | int | owning customer; most customers own 1 account, a shrinking tail up to 5 (seed-time weighted distribution) |
 | `status` | int | |
 
-Transfer record (160-byte fixed-width binary, in the stream and on to Kinesis): `id`,
-`from_account`, `to_account`, `amount`, `currency`, `ts`, `status`, `memo` (100 bytes, UTF-8).
+Transfer record (176-byte fixed-width binary, in the stream and on to Kinesis): `id`,
+`from_account`, `to_account`, `amount`, `currency`, `ts`, `status`, `memo` (100 bytes, UTF-8),
+`from_customer_id`, `to_customer_id`.
 One record per transfer — a debit-account / credit-account leg split, if a consumer wants
 that shape (e.g. an online-banking transaction history view), happens downstream, not here.
 
