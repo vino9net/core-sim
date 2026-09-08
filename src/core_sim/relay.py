@@ -122,7 +122,7 @@ class Relay:
                     await r.xack(s.stream_key, s.relay_group, *acked_ids)
 
                 published += len(acked_ids)
-                log.debug("relay.batch", n=len(acked_ids), total=published)
+                log.info("relay.batch", n=len(acked_ids), total=published)
         finally:
             await r.aclose()
             log.info("relay.stopped", published=published)
