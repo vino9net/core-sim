@@ -21,10 +21,6 @@ dependencies = [
     "httptools>=0.6",
 ]
 
-[project.optional-dependencies]
-# Postgres engines (pg_naive baseline etc.) — see ARCH_DESIGN.md D7.
-postgres = ["asyncpg>=0.30"]
-
 [project.scripts]
 core-sim = "core_sim.__main__:main"
 core-sim-relay = "core_sim.relay:main"

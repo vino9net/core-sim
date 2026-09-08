@@ -21,7 +21,7 @@ jobs:
     - uses: actions/checkout@v7
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -29,7 +29,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install uv
-        uv sync --locked --extra postgres
+        uv sync --locked
 
     - name: Linting
       run: |
@@ -47,6 +47,20 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        include:
+          # Same Dockerfile/image content, two entrypoints (pyproject
+          # [project.scripts]): `core-sim` runs the server, `core-sim-relay`
+          # runs the outbox relay. Publishing them as separate packages keeps
+          # their tag/version history (and cleanup) independent.
+          - name: server
+            suffix: ""
+            command: core-sim
+          - name: relay
+            suffix: "-relay"
+            command: core-sim-relay
+
     steps:
     - uses: actions/checkout@v7
 
@@ -54,7 +68,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v6
       with:
-        images: ghcr.io/${{ github.repository }}
+        images: ghcr.io/${{ github.repository }}${{ matrix.suffix }}
         tags: |
           type=ref,event=tag
           type=raw,value=main-{{date 'YYYYMMDD-HHmmss' tz='Asia/Singapore'}}-{{sha}},enable=${{ github.ref == 'refs/heads/main' }}
@@ -85,6 +99,8 @@ jobs:
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          APP_CMD=${{ matrix.command }}
 
   clean-up:
     needs: buildx
@@ -92,12 +108,16 @@ jobs:
     permissions:
       packages: write
 
+    strategy:
+      matrix:
+        suffix: ["", "-relay"]
+
     steps:
     - name: Delete old images
       uses: actions/delete-package-versions@v5
       with:
         owner: ${{ github.repository_owner }}
-        package-name: ${{ github.event.repository.name }}
+        package-name: ${{ github.event.repository.name }}${{ matrix.suffix }}
         package-type: container
         min-versions-to-keep: 5
         ignore-versions: latest

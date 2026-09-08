@@ -12,19 +12,17 @@ WORKDIR /app
 
 # Dependency layer: bind-mount only the lockfile and manifest so this stays cached
 # across source edits. --no-install-project keeps core_sim itself out of it.
-# The postgres extra is baked in because config.py swaps engines from env at startup
-# (ARCH_DESIGN.md D3/D7) — pg_naive must not need a different image.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-dev --no-install-project --extra postgres
+    uv sync --locked --no-dev --no-install-project
 
 COPY . /app
 
 # --no-editable copies core_sim into the venv rather than linking back to /app/src,
 # which is what lets the final stage take .venv alone.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable --extra postgres
+    uv sync --locked --no-dev --no-editable
 
 
 FROM python:3.14-slim
@@ -42,6 +40,9 @@ WORKDIR /app
 
 EXPOSE 8000
 
-# core-sim-relay is the other entrypoint (pyproject [project.scripts]); override with
-# `docker run ... core-sim-relay`.
-CMD ["core-sim"]
+# core-sim-relay is the other entrypoint (pyproject [project.scripts]). The CI pipeline
+# builds/publishes this image twice, once per entrypoint, via --build-arg APP_CMD=...;
+# override at runtime too with `docker run ... core-sim-relay`.
+ARG APP_CMD=core-sim
+ENV APP_CMD=${APP_CMD}
+CMD ["sh", "-c", "exec ${APP_CMD}"]
