@@ -62,8 +62,8 @@ there is only ever one. Uniform and hot-account throughput are *the same number*
 **Accepted costs — both are real:**
 
 1. **It deletes the contention experiment.** The hot-account cliff is structurally
-   impossible in Redis. This is why Postgres engines stay in the matrix (§3.7) — otherwise
-   we lose the most interesting result we set out to produce.
+   impossible in Redis. A Postgres engine is the one thing that could still produce it
+   (§D7) — currently not built, since Redis already clears the throughput this rig needs.
 2. **It cannot be sharded.** Redis Cluster has no atomic cross-slot operations, and a
    transfer touches an arbitrary *pair* of accounts. Hash tags can co-locate specific
    accounts but not all pairs when anyone can pay anyone. **One instance, one core for
@@ -181,22 +181,24 @@ Same REST surface, swappable by config. **The comparison is the product.**
 
 | Engine | Uniform | Hot account | Notes |
 |---|---|---|---|
-| `pg_naive` | ~5k | ~300 | Baseline. **Measured at 3-5k in prototype** — this is the calibration fixed point |
-| `pg_sproc` | ~30k | ~1.5k | One round trip, ordered `FOR UPDATE`. Collapses lock hold time |
-| `pg_sharded` | ~35k | ~20k | Balance sharded across N rows; turns the cliff into a slope |
-| `pg_batched` | ~50k | ~50k | In-process netting + batch apply |
 | `redis_lua` | ~80-120k | ~80-120k | One `EVALSHA` |
 | `redis_batched` | ~300-500k | ~300-500k | N transfers per script |
 | `dragonfly_batched` | measure | measure | Config swap — see §8 |
 
-All figures are estimates for an 8-core VM except the measured `pg_naive` row.
+All figures are estimates for an 8-core VM.
 
 **The recurring lesson, and the rig should demonstrate it:** every optimisation here is the
-same one. `pg_batched`, `redis_batched`, the Kinesis publish, the file flush, surviving K8s
-cross-node RTT — all of it is *amortize the call*. The call is always the cost.
+same one. `redis_batched`, the Kinesis publish, the file flush, surviving K8s cross-node RTT
+— all of it is *amortize the call*. The call is always the cost.
 
-**Keep the Postgres engines.** They are where the hot-account story lives, and `pg_naive` is
-the only measured point to calibrate everything else against.
+**Postgres engines (`pg_naive`, `pg_sproc`, `pg_sharded`, `pg_batched`) are deliberately not
+built.** Redis already clears the throughput this rig needs, and a hot-account cliff has
+nowhere to hide once contention is real money moving through one instance — Postgres's value
+would be in *demonstrating* that cliff and the lock-contention story around it, not in beating
+Redis on raw numbers. If that comparison — or Postgres's multi-core ceiling on a large box, or
+its connection-churn behaviour under autoscaling — becomes something we actually need to show,
+the engine-matrix abstraction (§D3) already has the seam for it; nothing here forecloses adding
+one later.
 
 ### D8 — Load generation
 
@@ -266,8 +268,8 @@ Sum every balance before and after a run. **It must be identical.** Transfers mo
 they never create or destroy it. If the sum drifts, the engine is broken and its throughput
 number is fiction.
 
-Every engine except `pg_naive` and `redis_lua` is doing something clever enough to get this
-wrong. This check is what makes the rig trustworthy.
+Every engine except `redis_lua` is doing something clever enough to get this wrong. This
+check is what makes the rig trustworthy.
 
 *(Context: the earlier Redis prototype measured slower than Postgres. Likely a sync client
 blocking the event loop, and/or read-modify-write without Lua — which would have been a
