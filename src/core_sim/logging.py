@@ -42,7 +42,9 @@ def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
             structlog.processors.format_exc_info,
             renderer,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(_LEVELS.get(level, logging.INFO)),
+        wrapper_class=structlog.make_filtering_bound_logger(
+            _LEVELS.get(level, logging.INFO)
+        ),
         logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
         cache_logger_on_first_use=True,
     )
@@ -68,7 +70,11 @@ def litestar_logging_config(level: str = "INFO") -> LoggingConfig:
             },
         },
         loggers={
-            "uvicorn.access": {"level": "WARNING", "handlers": ["console"], "propagate": False},
+            "uvicorn.access": {
+                "level": "WARNING",
+                "handlers": ["console"],
+                "propagate": False,
+            },
             "uvicorn.error": {"level": level, "handlers": ["console"], "propagate": False},
         },
         disable_stack_trace={404},

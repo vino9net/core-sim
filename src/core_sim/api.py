@@ -86,7 +86,9 @@ async def seed(data: SeedRequest, engine: Engine) -> ConservationReport:
 
 
 @get("/admin/conservation", summary="Sum of all balances")
-async def conservation(engine: Engine, expected_total: int | None = None) -> ConservationReport:
+async def conservation(
+    engine: Engine, expected_total: int | None = None
+) -> ConservationReport:
     """ARCH_DESIGN.md §6.1 — the check that makes every other number trustworthy.
 
     Run before a load run, run after, compare. Transfers move money; they never create

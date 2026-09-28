@@ -112,7 +112,9 @@ def pack(
 def unpack(
     buf: bytes, offset: int = 0
 ) -> tuple[bytes, int, int, int, str, int, int, str, int, int]:
-    ulid, frm, to, amt, ccy, ts, status, memo, from_cid, to_cid = _RECORD.unpack_from(buf, offset)
+    ulid, frm, to, amt, ccy, ts, status, memo, from_cid, to_cid = _RECORD.unpack_from(
+        buf, offset
+    )
     return (
         ulid,
         frm,

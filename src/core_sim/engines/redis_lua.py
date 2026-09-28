@@ -51,11 +51,13 @@ _CUSTOMER_ASSIGNMENT_SEED = 1337
 
 def _assign_customer_ids(n_accounts: int) -> list[int]:
     """One customer id (1-based) per account index 0..n_accounts-1."""
-    rng = random.Random(_CUSTOMER_ASSIGNMENT_SEED)
+    rng = random.Random(_CUSTOMER_ASSIGNMENT_SEED)  # noqa: S311 - sim data, not crypto
     customer_ids: list[int] = []
     next_customer_id = 1
     while len(customer_ids) < n_accounts:
-        size = rng.choices(_ACCOUNTS_PER_CUSTOMER, weights=_ACCOUNTS_PER_CUSTOMER_WEIGHTS)[0]
+        size = rng.choices(_ACCOUNTS_PER_CUSTOMER, weights=_ACCOUNTS_PER_CUSTOMER_WEIGHTS)[
+            0
+        ]
         size = min(size, n_accounts - len(customer_ids))
         customer_ids.extend([next_customer_id] * size)
         next_customer_id += 1

@@ -68,7 +68,9 @@ class Relay:
 
             kinesis = boto3.client("kinesis")  # region/endpoint resolved by boto3 itself
         else:
-            log.warning("relay.publish_disabled", note="draining and acking, not publishing")
+            log.warning(
+                "relay.publish_disabled", note="draining and acking, not publishing"
+            )
 
         try:
             await r.xgroup_create(s.stream_key, s.relay_group, id="0", mkstream=True)
@@ -101,7 +103,9 @@ class Relay:
                 # redis-py types xreadgroup as a broad union that does not match what it
                 # actually returns: a list of (stream_name, [(entry_id, fields), ...]).
                 # Narrow it once, here, rather than fighting the stub at every use.
-                msgs = cast("list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]]", raw)
+                msgs = cast(
+                    "list[tuple[bytes, list[tuple[bytes, dict[bytes, bytes]]]]]", raw
+                )
                 entries = msgs[0][1] if msgs else []
 
                 if not entries:

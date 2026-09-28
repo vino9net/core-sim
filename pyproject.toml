@@ -70,7 +70,7 @@ omit = [
 # https://docs.astral.sh/ruff/configuration/
 
 [tool.ruff]
-line-length = 98
+line-length = 92
 indent-width = 4
 exclude = [
     ".git",
@@ -87,8 +87,14 @@ select = [
     "C",
     "I",
     "A",
-] # Enable checks for PEP8, imports, and other standard rules
-ignore = ["E203", "E266"]
+    "B",
+    "S",
+    "UP",
+] # Enable checks for PEP8, imports, bugbear, security, and pyupgrade
+ignore = ["E203", "E266", "S101"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.pyright]
 include = [

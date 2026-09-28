@@ -66,7 +66,7 @@ class Settings:
     relay_block_ms: int = 100
 
     # --- server ---
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"  # noqa: S104 - must be reachable from other VMs in the VPC/SG
     port: int = 8000
 
     # --- logging ---
@@ -82,7 +82,9 @@ class Settings:
         return cls(
             engine=_env("ENGINE", cls.engine),
             redis_url=_env("REDIS_URL", cls.redis_url),
-            redis_max_connections=_env_int("REDIS_MAX_CONNECTIONS", cls.redis_max_connections),
+            redis_max_connections=_env_int(
+                "REDIS_MAX_CONNECTIONS", cls.redis_max_connections
+            ),
             redis_pool_timeout=float(
                 os.getenv("REDIS_POOL_TIMEOUT", str(cls.redis_pool_timeout))
             ),
@@ -91,7 +93,9 @@ class Settings:
             idem_ttl_seconds=_env_int("IDEM_TTL_SECONDS", cls.idem_ttl_seconds),
             kinesis_stream=_env("KINESIS_STREAM", cls.kinesis_stream),
             relay_group=_env("RELAY_GROUP", cls.relay_group),
-            relay_consumer=_env("RELAY_CONSUMER", os.getenv("HOSTNAME", cls.relay_consumer)),
+            relay_consumer=_env(
+                "RELAY_CONSUMER", os.getenv("HOSTNAME", cls.relay_consumer)
+            ),
             relay_batch=_env_int("RELAY_BATCH", cls.relay_batch),
             relay_block_ms=_env_int("RELAY_BLOCK_MS", cls.relay_block_ms),
             host=_env("HOST", cls.host),

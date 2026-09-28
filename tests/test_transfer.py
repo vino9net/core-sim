@@ -41,7 +41,8 @@ def _redis_available() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _redis_available(), reason=f"no redis at {REDIS_URL} (try: brew services start redis)"
+    not _redis_available(),
+    reason=f"no redis at {REDIS_URL} (try: brew services start redis)",
 )
 
 
@@ -92,13 +93,18 @@ async def test_unknown_account(engine):
 
 async def test_currency_mismatch(engine):
     req = TransferRequest(
-        from_account=0, to_account=1, amount=10, currency="USD", idempotency_key=str(uuid.uuid4())
+        from_account=0,
+        to_account=1,
+        amount=10,
+        currency="USD",
+        idempotency_key=str(uuid.uuid4()),
     )
     assert (await engine.transfer(req)).status is TransferStatus.CURRENCY_MISMATCH
 
 
 async def test_self_transfer_rejected(engine):
-    assert (await engine.transfer(_req(0, 0, 10))).status is TransferStatus.INSUFFICIENT_FUNDS
+    result = await engine.transfer(_req(0, 0, 10))
+    assert result.status is TransferStatus.INSUFFICIENT_FUNDS
 
 
 async def test_idempotent_replay_returns_original(engine):
@@ -172,7 +178,9 @@ async def test_conservation_under_concurrency(engine):
     assert (await engine.conservation()).total_balance == expected
 
     # Hammer a hot pair from many coroutines at once.
-    await asyncio.gather(*(engine.transfer(_req(i % 10, 10 + (i % 10), 13)) for i in range(500)))
+    await asyncio.gather(
+        *(engine.transfer(_req(i % 10, 10 + (i % 10), 13)) for i in range(500))
+    )
 
     report = await engine.conservation()
     assert report.n_accounts == N

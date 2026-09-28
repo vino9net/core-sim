@@ -78,7 +78,8 @@ def test_ulid_is_time_ordered():
 def test_batch_iteration():
     # Batches are records concatenated with no framing — the fixed width is the framing.
     batch = b"".join(
-        pack(new_ulid(), i, i + 1, 10 * i, "SGD", 1_700_000_000_000 + i, 1) for i in range(5)
+        pack(new_ulid(), i, i + 1, 10 * i, "SGD", 1_700_000_000_000 + i, 1)
+        for i in range(5)
     )
     assert len(batch) == 5 * RECORD_SIZE
     out = list(iter_records(batch))
